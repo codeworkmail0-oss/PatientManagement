@@ -1,0 +1,207 @@
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: patient_postgres
+    environment:
+      POSTGRES_DB: patient_db
+      POSTGRES_USER: grim123
+      POSTGRES_PASSWORD: grim123
+      PGTZ: UTC
+      TZ: UTC
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - patient-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grim123 -d patient_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: patient_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - patient-network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: patient_kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    networks:
+      - patient-network
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  zipkin:
+    image: openzipkin/zipkin
+    container_name: patient_zipkin
+    ports:
+      - "9411:9411"
+    networks:
+      - patient-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9411/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  eureka-server:
+    build: ./EurekaServer
+    container_name: eureka_server
+    ports:
+      - "8761:8761"
+    networks:
+      - patient-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8761/actuator/health" ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  auth-service:
+    build: ./AuthService
+    container_name: auth_service
+    networks:
+      - patient-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/patient_db
+      SPRING_DATASOURCE_USERNAME: grim123
+      SPRING_DATASOURCE_PASSWORD: grim123
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4005/actuator/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  billing-service:
+    build: ./BillingManagement
+    container_name: billing_service
+    networks:
+      - patient-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/patient_db
+      SPRING_DATASOURCE_USERNAME: grim123
+      SPRING_DATASOURCE_PASSWORD: grim123
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4001/actuator/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  patient-service:
+    build: ./patientService
+    container_name: patient_service
+    networks:
+      - patient-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+      billing-service:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/patient_db
+      SPRING_DATASOURCE_USERNAME: grim123
+      SPRING_DATASOURCE_PASSWORD: grim123
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      BILLING_SERVICE_HOST: billing-service
+      BILLING_SERVICE_PORT: 9001
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/actuator/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  analytics-service:
+    build: ./analytics-service
+    container_name: analytics_service
+    networks:
+      - patient-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+      billing-service:
+        condition: service_healthy
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      GRPC_CLIENT_BILLINGSERVICE_ADDRESS: static://billing-service:9001
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+
+  api-gateway:
+    build: ./ApiGateway
+    container_name: api_gateway
+    ports:
+      - "4004:4004"
+    networks:
+      - patient-network
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      patient-service:
+        condition: service_healthy
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      AUTH_SERVICE_URL: http://auth-service:4005
+
+networks:
+  patient-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local

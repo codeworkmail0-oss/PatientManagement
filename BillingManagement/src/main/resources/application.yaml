@@ -1,0 +1,49 @@
+spring:
+  application:
+    name: BillingManagement
+
+  datasource:
+      url: jdbc:postgresql://localhost:5432/billing_db?TimeZone=UTC
+      username: grim123
+      password: grim123
+      driver-class-name: org.postgresql.Driver
+
+  jpa:
+      hibernate:
+        ddl-auto: validate
+      properties:
+        hibernate:
+          jdbc:
+            time_zone: UTC
+          dialect: org.hibernate.dialect.PostgreSQLDialect
+      show-sql: true
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 0
+    locations: classpath:db/migration
+    table: flyway_schema_history_billing
+
+
+server:
+  port: 4001
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka-server:8761/eureka
+  instance:
+    prefer-ip-address: true
+
+
+grpc:
+  server:
+   port: 9001
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  zipkin:
+    tracing:
+      endpoint: http://localhost:9411/api/v2/spans

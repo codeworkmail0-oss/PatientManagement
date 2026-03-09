@@ -1,0 +1,62 @@
+spring:
+  application:
+    name: analytics-service
+
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: analytics-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: xxxxx@mail.com
+    password:  xxxx xxxx xxxx xxxx
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
+  task:
+    execution:
+      pool:
+        core-size: 5
+        max-size: 10
+      thread-name-prefix: async-task-
+
+server:
+  port: 4002
+
+logging:
+  level:
+    root: INFO
+    org.springframework.kafka: INFO
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka-server:8761/eureka
+  instance:
+    prefer-ip-address: true
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  zipkin:
+    tracing:
+      endpoint: http://localhost:9411/api/v2/spans
+
+grpc:
+  client:
+    billingService:
+      address: static://localhost:9001
+      negotiationType: PLAINTEXT
